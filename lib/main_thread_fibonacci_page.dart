@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_isolates/fibonacci.dart';
 import 'package:flutter_isolates/loading_skeleton.dart';
 
+enum _CalculationMode { mainThread, isolateRun }
+
 class MainThreadFibonacciPage extends StatefulWidget {
   const MainThreadFibonacciPage({super.key});
 
@@ -20,6 +22,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
   int? _lastInput;
   int? _lastResult;
   Duration? _elapsed;
+  _CalculationMode? _activeMode;
 
   @override
   void dispose() {
@@ -28,6 +31,14 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
   }
 
   Future<void> _calculateOnMainThread() async {
+    await _runCalculation(_CalculationMode.mainThread);
+  }
+
+  Future<void> _calculateWithIsolateRun() async {
+    await _runCalculation(_CalculationMode.isolateRun);
+  }
+
+  Future<void> _runCalculation(_CalculationMode mode) async {
     FocusManager.instance.primaryFocus?.unfocus();
 
     final String rawInput = _inputController.text;
@@ -51,6 +62,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
     setState(() {
       _inputError = null;
       _isCalculating = true;
+      _activeMode = mode;
       _lastInput = value;
       _lastResult = null;
       _elapsed = null;
@@ -59,7 +71,12 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
     await Future<void>.delayed(const Duration(milliseconds: 80));
 
     final Stopwatch stopwatch = Stopwatch()..start();
-    final int result = fibonacciRecursive(value);
+    final int result;
+    if (mode == _CalculationMode.mainThread) {
+      result = fibonacciRecursive(value);
+    } else {
+      result = await fibonacciWithIsolateRun(value);
+    }
     stopwatch.stop();
 
     if (!mounted) {
@@ -68,6 +85,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
 
     setState(() {
       _isCalculating = false;
+      _activeMode = null;
       _lastResult = result;
       _elapsed = stopwatch.elapsed;
     });
@@ -83,7 +101,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(title: const Text('Fibonacci POC - Main Thread')),
+      appBar: AppBar(title: const Text('Fibonacci POC - Main vs Isolate')),
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
@@ -103,8 +121,8 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                   const SizedBox(height: 8),
                   Text(
                     'This version runs the recursive calculation on the main '
-                    'thread. For larger values, the CPU load blocks rendering '
-                    'and the skeleton animation freezes.',
+                    'thread and with Isolate.run. For larger values, compare '
+                    'how the skeleton behaves with each approach.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -131,12 +149,26 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                       label: const Text('Calculate on Main Thread'),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      key: const Key('calculate-isolate-run-button'),
+                      onPressed: _isCalculating
+                          ? null
+                          : _calculateWithIsolateRun,
+                      icon: const Icon(Icons.rocket_launch_outlined),
+                      label: const Text('Calculate with Isolate.run'),
+                    ),
+                  ),
                   const SizedBox(height: 20),
                   const LoadingSkeleton(key: ValueKey('loading-skeleton')),
                   const SizedBox(height: 12),
                   Text(
                     _isCalculating
-                        ? 'Calculating on the main thread. The skeleton may freeze for large n.'
+                        ? _activeMode == _CalculationMode.mainThread
+                              ? 'Calculating on the main thread. The skeleton may freeze for large n.'
+                              : 'Calculating with Isolate.run. The skeleton should stay smooth.'
                         : 'The skeleton above runs continuously to highlight UI jank during heavy work.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,

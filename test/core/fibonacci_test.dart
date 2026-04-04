@@ -50,4 +50,11 @@ void main() {
       );
     });
   });
+
+  group('fibonacciWithIsolateRun', () {
+    test('returns expected value using Isolate.run', () async {
+      final int result = await fibonacciWithIsolateRun(10);
+      expect(result, 55);
+    });
+  });
 }

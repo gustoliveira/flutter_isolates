@@ -33,7 +33,7 @@ void main() {
     expect(find.text('Please enter a valid integer.'), findsOneWidget);
   });
 
-  testWidgets('keeps skeleton visible while calculating and after result', (
+  testWidgets('keeps skeleton visible while main thread calculates', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(createPage());
@@ -66,5 +66,28 @@ void main() {
     expect(find.byKey(const Key('fibonacci-result-text')), findsOneWidget);
     expect(find.text('fib(10) = 55'), findsOneWidget);
     expect(find.byKey(const Key('fibonacci-elapsed-text')), findsOneWidget);
+  });
+
+  testWidgets('starts Isolate.run calculation flow from second button', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(createPage());
+
+    await tester.enterText(
+      find.byKey(const Key('fibonacci-input-field')),
+      '10',
+    );
+    await tester.tap(find.byKey(const Key('calculate-isolate-run-button')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('fibonacci-calculating-text')), findsOneWidget);
+    expect(
+      find.text(
+        'Calculating with Isolate.run. The skeleton should stay smooth.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(milliseconds: 120));
   });
 }
