@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_isolates/main_thread_fibonacci_page.dart';
+import 'package:flutter_isolates/fibonacci_poc_page.dart';
 
 void main() {
   Widget createPage() {
@@ -16,6 +16,7 @@ void main() {
       find.byKey(const ValueKey<String>('loading-skeleton')),
       findsOneWidget,
     );
+    expect(find.text('Latest elapsed by strategy'), findsOneWidget);
   });
 
   testWidgets('shows input validation for non-integer values', (
@@ -84,6 +85,29 @@ void main() {
     expect(
       find.text(
         'Calculating with Isolate.run. The skeleton should stay smooth.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(milliseconds: 120));
+  });
+
+  testWidgets('starts Isolate.spawn worker flow from third button', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(createPage());
+
+    await tester.enterText(
+      find.byKey(const Key('fibonacci-input-field')),
+      '10',
+    );
+    await tester.tap(find.byKey(const Key('calculate-spawn-worker-button')));
+    await tester.pump();
+
+    expect(find.byKey(const Key('fibonacci-calculating-text')), findsOneWidget);
+    expect(
+      find.text(
+        'Calculating with Isolate.spawn + ports. The skeleton should stay smooth.',
       ),
       findsOneWidget,
     );

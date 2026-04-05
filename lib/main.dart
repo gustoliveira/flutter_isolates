@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_isolates/main_thread_fibonacci_page.dart';
+import 'package:flutter_isolates/fibonacci_poc_page.dart';
 
 void main() {
   runApp(const MyApp());

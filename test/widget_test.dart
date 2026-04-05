@@ -19,6 +19,10 @@ void main() {
       findsOneWidget,
     );
     expect(
+      find.byKey(const Key('calculate-spawn-worker-button')),
+      findsOneWidget,
+    );
+    expect(
       find.byKey(const ValueKey<String>('loading-skeleton')),
       findsOneWidget,
     );

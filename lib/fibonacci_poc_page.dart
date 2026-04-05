@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_isolates/fibonacci.dart';
+import 'package:flutter_isolates/fibonacci_spawn_worker.dart';
 import 'package:flutter_isolates/loading_skeleton.dart';
 
-enum _CalculationMode { mainThread, isolateRun }
+enum _CalculationMode { mainThread, isolateRun, spawnWorker }
 
 class MainThreadFibonacciPage extends StatefulWidget {
   const MainThreadFibonacciPage({super.key});
@@ -14,18 +15,23 @@ class MainThreadFibonacciPage extends StatefulWidget {
 
 class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
   final TextEditingController _inputController = TextEditingController(
-    text: '42',
+    text: '45',
   );
+  final FibonacciSpawnWorker _spawnWorker = FibonacciSpawnWorker();
 
   bool _isCalculating = false;
   String? _inputError;
   int? _lastInput;
   int? _lastResult;
   Duration? _elapsed;
+  _CalculationMode? _lastCompletedMode;
   _CalculationMode? _activeMode;
+  final Map<_CalculationMode, Duration> _elapsedByMode =
+      <_CalculationMode, Duration>{};
 
   @override
   void dispose() {
+    _spawnWorker.dispose();
     _inputController.dispose();
     super.dispose();
   }
@@ -36,6 +42,10 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
 
   Future<void> _calculateWithIsolateRun() async {
     await _runCalculation(_CalculationMode.isolateRun);
+  }
+
+  Future<void> _calculateWithSpawnWorker() async {
+    await _runCalculation(_CalculationMode.spawnWorker);
   }
 
   Future<void> _runCalculation(_CalculationMode mode) async {
@@ -74,8 +84,10 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
     final int result;
     if (mode == _CalculationMode.mainThread) {
       result = fibonacciRecursive(value);
-    } else {
+    } else if (mode == _CalculationMode.isolateRun) {
       result = await fibonacciWithIsolateRun(value);
+    } else {
+      result = await _spawnWorker.calculate(value);
     }
     stopwatch.stop();
 
@@ -86,13 +98,39 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
     setState(() {
       _isCalculating = false;
       _activeMode = null;
+      _lastCompletedMode = mode;
       _lastResult = result;
       _elapsed = stopwatch.elapsed;
+      _elapsedByMode[mode] = stopwatch.elapsed;
     });
   }
 
   String _formatElapsed(Duration elapsed) {
     return '${elapsed.inMilliseconds} ms';
+  }
+
+  String _modeLabel(_CalculationMode mode) {
+    switch (mode) {
+      case _CalculationMode.mainThread:
+        return 'Main Thread';
+      case _CalculationMode.isolateRun:
+        return 'Isolate.run';
+      case _CalculationMode.spawnWorker:
+        return 'Isolate.spawn + ports';
+    }
+  }
+
+  String _activeModeDescription() {
+    switch (_activeMode) {
+      case _CalculationMode.mainThread:
+        return 'Calculating on the main thread. The skeleton may freeze for large n.';
+      case _CalculationMode.isolateRun:
+        return 'Calculating with Isolate.run. The skeleton should stay smooth.';
+      case _CalculationMode.spawnWorker:
+        return 'Calculating with Isolate.spawn + ports. The skeleton should stay smooth.';
+      case null:
+        return 'The skeleton above runs continuously to highlight UI jank during heavy work.';
+    }
   }
 
   @override
@@ -101,7 +139,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(title: const Text('Fibonacci POC - Main vs Isolate')),
+      appBar: AppBar(title: const Text('Fibonacci POC - Strategy Comparison')),
       body: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
@@ -121,8 +159,9 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                   const SizedBox(height: 8),
                   Text(
                     'This version runs the recursive calculation on the main '
-                    'thread and with Isolate.run. For larger values, compare '
-                    'how the skeleton behaves with each approach.',
+                    'thread, with Isolate.run, and with a persistent '
+                    'Isolate.spawn worker using ports. Compare elapsed time and '
+                    'skeleton smoothness across strategies.',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -161,15 +200,23 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                       label: const Text('Calculate with Isolate.run'),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      key: const Key('calculate-spawn-worker-button'),
+                      onPressed: _isCalculating
+                          ? null
+                          : _calculateWithSpawnWorker,
+                      icon: const Icon(Icons.hub_outlined),
+                      label: const Text('Calculate with Isolate.spawn + ports'),
+                    ),
+                  ),
                   const SizedBox(height: 20),
                   const LoadingSkeleton(key: ValueKey('loading-skeleton')),
                   const SizedBox(height: 12),
                   Text(
-                    _isCalculating
-                        ? _activeMode == _CalculationMode.mainThread
-                              ? 'Calculating on the main thread. The skeleton may freeze for large n.'
-                              : 'Calculating with Isolate.run. The skeleton should stay smooth.'
-                        : 'The skeleton above runs continuously to highlight UI jank during heavy work.',
+                    _activeModeDescription(),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -181,7 +228,19 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                     elapsedLabel: _elapsed == null
                         ? null
                         : _formatElapsed(_elapsed!),
+                    modeLabel: _lastCompletedMode == null
+                        ? null
+                        : _modeLabel(_lastCompletedMode!),
                     isCalculating: _isCalculating,
+                  ),
+                  const SizedBox(height: 12),
+                  _ComparisonCard(
+                    mainThreadElapsed:
+                        _elapsedByMode[_CalculationMode.mainThread],
+                    isolateRunElapsed:
+                        _elapsedByMode[_CalculationMode.isolateRun],
+                    spawnWorkerElapsed:
+                        _elapsedByMode[_CalculationMode.spawnWorker],
                   ),
                 ],
               ),
@@ -198,12 +257,14 @@ class _ResultCard extends StatelessWidget {
     this.input,
     this.result,
     this.elapsedLabel,
+    this.modeLabel,
     this.isCalculating = false,
   });
 
   final int? input;
   final int? result;
   final String? elapsedLabel;
+  final String? modeLabel;
   final bool isCalculating;
 
   @override
@@ -251,6 +312,13 @@ class _ResultCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+            if (modeLabel != null)
+              Text(
+                'Strategy: $modeLabel',
+                key: const Key('fibonacci-mode-text'),
+                style: theme.textTheme.bodyMedium,
+              ),
+            if (modeLabel != null) const SizedBox(height: 8),
             Text(
               'Elapsed: $elapsedLabel',
               key: const Key('fibonacci-elapsed-text'),
@@ -259,6 +327,87 @@ class _ResultCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ComparisonCard extends StatelessWidget {
+  const _ComparisonCard({
+    this.mainThreadElapsed,
+    this.isolateRunElapsed,
+    this.spawnWorkerElapsed,
+  });
+
+  final Duration? mainThreadElapsed;
+  final Duration? isolateRunElapsed;
+  final Duration? spawnWorkerElapsed;
+
+  String _format(Duration? elapsed) {
+    if (elapsed == null) {
+      return '--';
+    }
+    return '${elapsed.inMilliseconds} ms';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Card(
+      color: theme.colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Latest elapsed by strategy',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _ComparisonRow(
+              label: 'Main Thread',
+              value: _format(mainThreadElapsed),
+            ),
+            const SizedBox(height: 6),
+            _ComparisonRow(
+              label: 'Isolate.run',
+              value: _format(isolateRunElapsed),
+            ),
+            const SizedBox(height: 6),
+            _ComparisonRow(
+              label: 'Isolate.spawn + ports',
+              value: _format(spawnWorkerElapsed),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComparisonRow extends StatelessWidget {
+  const _ComparisonRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+        Text(
+          value,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
