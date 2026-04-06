@@ -1,7 +1,8 @@
+import 'dart:async';
 import 'dart:isolate';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_isolates/fibonacci_spawn_worker.dart';
+import 'package:flutter_isolates/isolates/fibonacci_spawn_worker.dart';
 
 void main() {
   group('FibonacciSpawnWorker', () {
@@ -36,9 +37,14 @@ void main() {
       'worker entrypoint guards malformed messages and stays responsive',
       () async {
         final ReceivePort readyPort = ReceivePort();
+        final ReceivePort responsePort = ReceivePort();
+        final StreamIterator<dynamic> responses = StreamIterator<dynamic>(
+          responsePort,
+        );
+
         final Isolate isolate = await Isolate.spawn(
           fibonacciWorkerEntryPoint,
-          readyPort.sendPort,
+          <Object>[readyPort.sendPort, responsePort.sendPort],
         );
 
         final SendPort workerPort = await readyPort.first as SendPort;
@@ -46,30 +52,39 @@ void main() {
 
         workerPort.send(123);
         workerPort.send(<Object>[10]);
-        workerPort.send(<Object>[10, 'not-a-send-port']);
+        workerPort.send(<Object>['not-an-id', 10]);
+        workerPort.send(<Object>[1, 'invalid']);
 
-        final ReceivePort invalidPayloadPort = ReceivePort();
-        workerPort.send(<Object>['invalid', invalidPayloadPort.sendPort]);
+        final bool hasErrorResponse = await responses.moveNext().timeout(
+          const Duration(seconds: 1),
+        );
+        expect(hasErrorResponse, isTrue);
 
-        final dynamic invalidPayloadResponse = await invalidPayloadPort.first
-            .timeout(const Duration(seconds: 1));
-        invalidPayloadPort.close();
-
+        final dynamic invalidPayloadResponse = responses.current;
         expect(invalidPayloadResponse, isA<List<dynamic>>());
         final List<dynamic> invalidList =
             invalidPayloadResponse as List<dynamic>;
-        expect(invalidList.first, 'error');
+        expect(invalidList.length, 3);
+        expect(invalidList[0], 'error');
+        expect(invalidList[1], 1);
 
-        final ReceivePort validResponsePort = ReceivePort();
-        workerPort.send(<Object>[10, validResponsePort.sendPort]);
-        final dynamic validResponse = await validResponsePort.first.timeout(
+        workerPort.send(<Object>[2, 10]);
+
+        final bool hasValidResponse = await responses.moveNext().timeout(
           const Duration(seconds: 1),
         );
-        validResponsePort.close();
+        expect(hasValidResponse, isTrue);
 
-        expect(validResponse, 55);
+        final dynamic validResponse = responses.current;
+        expect(validResponse, isA<List<dynamic>>());
+        final List<dynamic> validList = validResponse as List<dynamic>;
+        expect(validList.length, 2);
+        expect(validList[0], 2);
+        expect(validList[1], 55);
 
         workerPort.send('shutdown');
+        await responses.cancel();
+        responsePort.close();
         isolate.kill(priority: Isolate.immediate);
       },
     );

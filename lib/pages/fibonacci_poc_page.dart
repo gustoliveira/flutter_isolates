@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_isolates/fibonacci.dart';
-import 'package:flutter_isolates/fibonacci_spawn_worker.dart';
-import 'package:flutter_isolates/loading_skeleton.dart';
+import 'package:flutter_isolates/core/fibonacci.dart';
+import 'package:flutter_isolates/isolates/fibonacci_isolate_run.dart'
+    as isolate_run;
+import 'package:flutter_isolates/isolates/fibonacci_spawn_worker.dart';
+import 'package:flutter_isolates/widgets/loading_skeleton.dart';
 
 enum _CalculationMode { mainThread, isolateRun, spawnWorker }
 
@@ -29,6 +32,8 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
   final Map<_CalculationMode, Duration> _elapsedByMode =
       <_CalculationMode, Duration>{};
 
+  bool get _isolateStrategiesEnabled => !kIsWeb;
+
   @override
   void dispose() {
     _spawnWorker.dispose();
@@ -49,6 +54,10 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
   }
 
   Future<void> _runCalculation(_CalculationMode mode) async {
+    if (!_isolateStrategiesEnabled && mode != _CalculationMode.mainThread) {
+      return;
+    }
+
     FocusManager.instance.primaryFocus?.unfocus();
 
     final String rawInput = _inputController.text;
@@ -85,7 +94,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
     if (mode == _CalculationMode.mainThread) {
       result = fibonacciRecursive(value);
     } else if (mode == _CalculationMode.isolateRun) {
-      result = await fibonacciWithIsolateRun(value);
+      result = await isolate_run.fibonacciWithIsolateRun(value);
     } else {
       result = await _spawnWorker.calculate(value);
     }
@@ -129,6 +138,9 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
       case _CalculationMode.spawnWorker:
         return 'Calculating with Isolate.spawn + ports. The skeleton should stay smooth.';
       case null:
+        if (!_isolateStrategiesEnabled) {
+          return 'Flutter Web: isolate strategies are disabled in this demo. Use Main Thread only.';
+        }
         return 'The skeleton above runs continuously to highlight UI jank during heavy work.';
     }
   }
@@ -136,6 +148,14 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final String introText = _isolateStrategiesEnabled
+        ? 'This version runs the recursive calculation on the main '
+              'thread, with Isolate.run, and with a persistent '
+              'Isolate.spawn worker using ports. Compare elapsed time and '
+              'skeleton smoothness across strategies.'
+        : 'Flutter Web mode: isolate strategies are intentionally disabled '
+              'for this demo. Only Main Thread is available so you can '
+              'observe UI blocking behavior.';
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -158,10 +178,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'This version runs the recursive calculation on the main '
-                    'thread, with Isolate.run, and with a persistent '
-                    'Isolate.spawn worker using ports. Compare elapsed time and '
-                    'skeleton smoothness across strategies.',
+                    introText,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -193,7 +210,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       key: const Key('calculate-isolate-run-button'),
-                      onPressed: _isCalculating
+                      onPressed: _isCalculating || !_isolateStrategiesEnabled
                           ? null
                           : _calculateWithIsolateRun,
                       icon: const Icon(Icons.rocket_launch_outlined),
@@ -205,7 +222,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       key: const Key('calculate-spawn-worker-button'),
-                      onPressed: _isCalculating
+                      onPressed: _isCalculating || !_isolateStrategiesEnabled
                           ? null
                           : _calculateWithSpawnWorker,
                       icon: const Icon(Icons.hub_outlined),
@@ -235,6 +252,7 @@ class _MainThreadFibonacciPageState extends State<MainThreadFibonacciPage> {
                   ),
                   const SizedBox(height: 12),
                   _ComparisonCard(
+                    isolateStrategiesEnabled: _isolateStrategiesEnabled,
                     mainThreadElapsed:
                         _elapsedByMode[_CalculationMode.mainThread],
                     isolateRunElapsed:
@@ -333,11 +351,13 @@ class _ResultCard extends StatelessWidget {
 
 class _ComparisonCard extends StatelessWidget {
   const _ComparisonCard({
+    required this.isolateStrategiesEnabled,
     this.mainThreadElapsed,
     this.isolateRunElapsed,
     this.spawnWorkerElapsed,
   });
 
+  final bool isolateStrategiesEnabled;
   final Duration? mainThreadElapsed;
   final Duration? isolateRunElapsed;
   final Duration? spawnWorkerElapsed;
@@ -374,12 +394,16 @@ class _ComparisonCard extends StatelessWidget {
             const SizedBox(height: 6),
             _ComparisonRow(
               label: 'Isolate.run',
-              value: _format(isolateRunElapsed),
+              value: isolateStrategiesEnabled
+                  ? _format(isolateRunElapsed)
+                  : 'Disabled on Web',
             ),
             const SizedBox(height: 6),
             _ComparisonRow(
               label: 'Isolate.spawn + ports',
-              value: _format(spawnWorkerElapsed),
+              value: isolateStrategiesEnabled
+                  ? _format(spawnWorkerElapsed)
+                  : 'Disabled on Web',
             ),
           ],
         ),

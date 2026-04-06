@@ -1,5 +1,3 @@
-import 'dart:isolate';
-
 const int kMaxRecommendedFibonacciInput = 100;
 
 int parseFibonacciInput(
@@ -25,8 +23,4 @@ int fibonacciRecursive(int n) {
     return n;
   }
   return fibonacciRecursive(n - 1) + fibonacciRecursive(n - 2);
-}
-
-Future<int> fibonacciWithIsolateRun(int n) {
-  return Isolate.run<int>(() => fibonacciRecursive(n));
 }

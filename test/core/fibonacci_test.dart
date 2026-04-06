@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_isolates/fibonacci.dart';
+import 'package:flutter_isolates/core/fibonacci.dart';
+import 'package:flutter_isolates/isolates/fibonacci_isolate_run.dart'
+    as isolate_run;
 
 void main() {
   group('fibonacciRecursive', () {
@@ -53,7 +55,7 @@ void main() {
 
   group('fibonacciWithIsolateRun', () {
     test('returns expected value using Isolate.run', () async {
-      final int result = await fibonacciWithIsolateRun(10);
+      final int result = await isolate_run.fibonacciWithIsolateRun(10);
       expect(result, 55);
     });
   });
